@@ -3,6 +3,6 @@
 
 #include "parser.h"
 
-int eval_program(ASTNode *program);
+int eval_program(const ASTNode *program);
 
-#endif
+#endif // APEXC_EVAL_H

@@ -1,122 +1,135 @@
-#ifndef PARSER_H
-#define PARSER_H
+#ifndef APEXC_PARSER_H
+#define APEXC_PARSER_H
 
 #include "lexer.h"
-#include <stdbool.h>
 
 typedef enum {
-  AST_NUM,
-  AST_BINARY_OP,
-  AST_RETURN,
-  AST_VAR_DECL,
-  AST_ASSIGN,
-  AST_VAR_REF,
-  AST_IF,
-  AST_WHILE,
-  AST_BLOCK,
-  AST_FUNC_CALL,
-  AST_FUNCTION,
-  AST_PROGRAM
+    AST_PROGRAM,
+    AST_FUNCTION,
+    AST_BLOCK,
+    AST_VAR_DECL,
+    AST_ASSIGN,
+    AST_RETURN,
+    AST_IF,
+    AST_WHILE,
+    AST_BINARY_OP,
+    AST_NUM,
+    AST_STRING,
+    AST_VAR_REF,
+    AST_FUNC_CALL
 } ASTNodeType;
-
-typedef struct {
-  char *name;
-  int offset;
-} Symbol;
-
-typedef struct {
-  Symbol *symbols;
-  int count;
-  int capacity;
-  int total_stack_bytes;
-} SymbolTable;
 
 typedef struct ASTNode ASTNode;
 
+typedef struct {
+    char name[64];
+    int offset;
+} Symbol;
+
+typedef struct {
+    Symbol symbols[64];
+    int symbol_count;
+    int total_stack_bytes;
+} SymbolTable;
+
 struct ASTNode {
-  ASTNodeType type;
-  union {
-    struct {
-      int value;
-    } num;
+    ASTNodeType type;
+    union {
+        // AST_PROGRAM
+        struct {
+            ASTNode **functions;
+            int function_count;
+        } program;
 
-    struct {
-      TokenType op; // TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH,
-                    // TOKEN_EQ, TOKEN_NE, etc.
-      ASTNode *left;
-      ASTNode *right;
-    } binary;
+        // AST_FUNCTION
+        struct {
+            char name[64];
+            int param_count;
+            ASTNode **body;
+            int body_count;
+            SymbolTable symbol_table;
+        } function;
 
-    struct {
-      ASTNode *expr;
-    } return_stmt;
+        // AST_BLOCK
+        struct {
+            ASTNode **stmts;
+            int stmt_count;
+        } block;
 
-    struct {
-      char *name;
-      int offset;
-      ASTNode *init; // Optional initializer expression
-    } var_decl;
+        // AST_VAR_DECL
+        struct {
+            char name[64];
+            int offset;
+            ASTNode *init;
+        } var_decl;
 
-    struct {
-      char *name;
-      int offset;
-      ASTNode *expr;
-    } assign;
+        // AST_ASSIGN
+        struct {
+            char name[64];
+            int offset;
+            ASTNode *expr;
+        } assign;
 
-    struct {
-      char *name;
-      int offset;
-    } var_ref;
+        // AST_RETURN
+        struct {
+            ASTNode *expr;
+        } return_stmt;
 
-    struct {
-      ASTNode *condition;
-      ASTNode *then_branch;
-      ASTNode *else_branch;
-    } if_stmt;
+        // AST_IF
+        struct {
+            ASTNode *condition;
+            ASTNode *then_branch;
+            ASTNode *else_branch;
+        } if_stmt;
 
-    struct {
-      ASTNode *condition;
-      ASTNode *body;
-    } while_stmt;
+        // AST_WHILE
+        struct {
+            ASTNode *condition;
+            ASTNode *body;
+        } while_stmt;
 
-    struct {
-      ASTNode **stmts;
-      int stmt_count;
-    } block;
+        // AST_BINARY_OP
+        struct {
+            TokenType op;
+            ASTNode *left;
+            ASTNode *right;
+        } binary;
 
-    struct {
-      char *name;
-      ASTNode **args;
-      int arg_count;
-    } func_call;
+        // AST_NUM
+        struct {
+            int value;
+        } num;
 
-    struct {
-      char *name;
-      char **params;
-      int param_count;
-      ASTNode **body;
-      int body_count;
-      SymbolTable symbol_table;
-    } function;
+        // AST_STRING
+        struct {
+            char *value;
+            int label_id;
+        } str;
 
-    struct {
-      ASTNode **functions;
-      int function_count;
-    } program;
-  };
+        // AST_VAR_REF
+        struct {
+            char name[64];
+            int offset;
+        } var_ref;
+
+        // AST_FUNC_CALL
+        struct {
+            char name[64];
+            ASTNode **args;
+            int arg_count;
+        } func_call;
+    };
 };
 
 typedef struct {
-  Lexer lexer;
-  Token current_token;
-  bool has_error;
-  char error_msg[256];
-  SymbolTable *current_symtab;
+    Lexer lexer;
+    Token current_token;
+    SymbolTable *current_symtab;
+    int string_literal_count;
 } Parser;
 
 Parser parser_init(const char *src);
 ASTNode *parse_program(Parser *p);
 void ast_free(ASTNode *node);
-void ast_dump(const ASTNode *node, int indent);
 
-#endif // PARSER_H
+#endif // APEXC_PARSER_H

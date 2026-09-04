@@ -1,28 +1,75 @@
 #include "eval.h"
+#include "builtins.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
+typedef struct VarScope {
     char name[64];
     int value;
-} Variable;
+    struct VarScope *next;
+} VarScope;
 
-typedef struct Env {
-    Variable vars[64];
-    int var_count;
-    struct Env *parent;
-} Env;
+typedef struct CallFrame {
+    VarScope *vars;
+    struct CallFrame *next;
+} CallFrame;
 
-static ASTNode *g_program = NULL;
+static const ASTNode *g_program_ast = NULL;
+static CallFrame *g_call_stack = NULL;
+static int g_has_returned = 0;
+static int g_return_value = 0;
 
-static int eval_expr(ASTNode *node, Env *env);
-static int eval_stmt(ASTNode *node, Env *env, int *returned, int *ret_val);
+static void push_frame(void) {
+    CallFrame *frame = calloc(1, sizeof(CallFrame));
+    frame->next = g_call_stack;
+    g_call_stack = frame;
+}
 
-static ASTNode *find_function(const char *name) {
-    if (!g_program || g_program->type != AST_PROGRAM) return NULL;
-    for (int i = 0; i < g_program->program.function_count; i++) {
-        ASTNode *fn = g_program->program.functions[i];
+static void pop_frame(void) {
+    if (!g_call_stack) return;
+    CallFrame *top = g_call_stack;
+    g_call_stack = top->next;
+
+    VarScope *v = top->vars;
+    while (v) {
+        VarScope *next = v->next;
+        free(v);
+        v = next;
+    }
+    free(top);
+}
+
+static void set_var(const char *name, int value) {
+    if (!g_call_stack) return;
+    for (VarScope *v = g_call_stack->vars; v; v = v->next) {
+        if (strcmp(v->name, name) == 0) {
+            v->value = value;
+            return;
+        }
+    }
+    VarScope *new_var = calloc(1, sizeof(VarScope));
+    strncpy(new_var->name, name, 63);
+    new_var->value = value;
+    new_var->next = g_call_stack->vars;
+    g_call_stack->vars = new_var;
+}
+
+static int get_var(const char *name, int *out_val) {
+    if (!g_call_stack) return 0;
+    for (VarScope *v = g_call_stack->vars; v; v = v->next) {
+        if (strcmp(v->name, name) == 0) {
+            *out_val = v->value;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static const ASTNode *find_function(const char *name) {
+    if (!g_program_ast || g_program_ast->type != AST_PROGRAM) return NULL;
+    for (int i = 0; i < g_program_ast->program.function_count; i++) {
+        const ASTNode *fn = g_program_ast->program.functions[i];
         if (strcmp(fn->function.name, name) == 0) {
             return fn;
         }
@@ -30,147 +77,166 @@ static ASTNode *find_function(const char *name) {
     return NULL;
 }
 
-static void set_var(Env *env, const char *name, int val) {
-    for (int i = 0; i < env->var_count; i++) {
-        if (strcmp(env->vars[i].name, name) == 0) {
-            env->vars[i].value = val;
-            return;
-        }
-    }
-    if (env->var_count < 64) {
-        strncpy(env->vars[env->var_count].name, name, 63);
-        env->vars[env->var_count].value = val;
-        env->var_count++;
-    }
-}
+static int eval_expr(const ASTNode *node);
+static void eval_stmt(const ASTNode *node);
 
-static int get_var(Env *env, const char *name) {
-    for (Env *cur = env; cur != NULL; cur = cur->parent) {
-        for (int i = 0; i < cur->var_count; i++) {
-            if (strcmp(cur->vars[i].name, name) == 0) {
-                return cur->vars[i].value;
-            }
-        }
-    }
-    return 0;
-}
-
-static int call_func(const char *name, int *args, int arg_count) {
-    ASTNode *fn = find_function(name);
-    if (!fn) return 0;
-
-    Env call_env = {0};
-    call_env.parent = NULL;
-
-    for (int i = 0; i < fn->function.param_count && i < arg_count; i++) {
-        const char *pname = fn->function.symbol_table.symbols[i].name;
-        set_var(&call_env, pname, args[i]);
-    }
-
-    int returned = 0;
-    int ret_val = 0;
-    for (int i = 0; i < fn->function.body_count && !returned; i++) {
-        eval_stmt(fn->function.body[i], &call_env, &returned, &ret_val);
-    }
-    return ret_val;
-}
-
-static int eval_expr(ASTNode *node, Env *env) {
-    if (!node) return 0;
+static int eval_expr(const ASTNode *node) {
+    if (!node || g_has_returned) return 0;
 
     switch (node->type) {
         case AST_NUM:
             return node->num.value;
 
-        case AST_VAR_REF:
-            return get_var(env, node->var_ref.name);
+        case AST_STRING:
+            // Return raw string pointer cast for direct internal passing
+            return (int)(intptr_t)node->str.value;
 
-        case AST_FUNC_CALL: {
-            int args[16];
-            int count = node->func_call.arg_count < 16 ? node->func_call.arg_count : 16;
-            for (int i = 0; i < count; i++) {
-                args[i] = eval_expr(node->func_call.args[i], env);
+        case AST_VAR_REF: {
+            int val = 0;
+            if (get_var(node->var_ref.name, &val)) {
+                return val;
             }
-            return call_func(node->func_call.name, args, count);
+            return 0;
         }
 
         case AST_BINARY_OP: {
-            int l = eval_expr(node->binary.left, env);
-            int r = eval_expr(node->binary.right, env);
+            int left = eval_expr(node->binary.left);
+            int right = eval_expr(node->binary.right);
             switch (node->binary.op) {
-                case TOKEN_PLUS:  return l + r;
-                case TOKEN_MINUS: return l - r;
-                case TOKEN_STAR:  return l * r;
-                case TOKEN_SLASH: return r != 0 ? l / r : 0;
-                case TOKEN_EQ:    return l == r;
-                case TOKEN_NE:    return l != r;
-                case TOKEN_LT:    return l < r;
-                case TOKEN_LE:    return l <= r;
-                case TOKEN_GT:    return l > r;
-                case TOKEN_GE:    return l >= r;
-                default: return 0;
+                case TOKEN_PLUS:  return left + right;
+                case TOKEN_MINUS: return left - right;
+                case TOKEN_STAR:  return left * right;
+                case TOKEN_SLASH: return right != 0 ? (left / right) : 0;
+                case TOKEN_EQ:    return left == right;
+                case TOKEN_NE:    return left != right;
+                case TOKEN_LT:    return left < right;
+                case TOKEN_LE:    return left <= right;
+                case TOKEN_GT:    return left > right;
+                case TOKEN_GE:    return left >= right;
+                default:          return 0;
             }
         }
+
+        case AST_FUNC_CALL: {
+            const char *fn_name = node->func_call.name;
+
+            // 1. Intercept Standard Library Calls (<stdio.h>, <math.h>)
+            if (is_builtin_func(fn_name)) {
+                int int_args[16] = {0};
+                const char *format_str = NULL;
+                int int_count = 0;
+
+                int total_args = node->func_call.arg_count < 16 ? node->func_call.arg_count : 16;
+                for (int i = 0; i < total_args; i++) {
+                    const ASTNode *arg = node->func_call.args[i];
+                    if (arg->type == AST_STRING) {
+                        if (!format_str) format_str = arg->str.value;
+                    } else {
+                        int_args[int_count++] = eval_expr(arg);
+                    }
+                }
+                return execute_builtin(fn_name, int_args, NULL, int_count, format_str);
+            }
+
+            // 2. User-Defined Functions
+            const ASTNode *fn_def = find_function(fn_name);
+            if (!fn_def) return 0;
+
+            int evaluated_args[16];
+            int count = node->func_call.arg_count < 16 ? node->func_call.arg_count : 16;
+            for (int i = 0; i < count; i++) {
+                evaluated_args[i] = eval_expr(node->func_call.args[i]);
+            }
+
+            push_frame();
+            // Bind arguments into parameter symbol names
+            for (int i = 0; i < fn_def->function.param_count && i < count; i++) {
+                set_var(fn_def->function.symbol_table.symbols[i].name, evaluated_args[i]);
+            }
+
+            int prev_returned = g_has_returned;
+            int prev_ret_val = g_return_value;
+            g_has_returned = 0;
+            g_return_value = 0;
+
+            for (int i = 0; i < fn_def->function.body_count && !g_has_returned; i++) {
+                eval_stmt(fn_def->function.body[i]);
+            }
+
+            int call_result = g_return_value;
+            pop_frame();
+
+            g_has_returned = prev_returned;
+            g_return_value = prev_ret_val;
+            return call_result;
+        }
+
         default:
             return 0;
     }
 }
 
-static int eval_stmt(ASTNode *node, Env *env, int *returned, int *ret_val) {
-    if (!node || *returned) return 0;
+static void eval_stmt(const ASTNode *node) {
+    if (!node || g_has_returned) return;
 
     switch (node->type) {
-        case AST_VAR_DECL:
-            if (node->var_decl.init) {
-                int val = eval_expr(node->var_decl.init, env);
-                set_var(env, node->var_decl.name, val);
+        case AST_BLOCK:
+            for (int i = 0; i < node->block.stmt_count && !g_has_returned; i++) {
+                eval_stmt(node->block.stmts[i]);
             }
             break;
 
-        case AST_ASSIGN: {
-            int val = eval_expr(node->assign.expr, env);
-            set_var(env, node->assign.name, val);
+        case AST_VAR_DECL:
+            set_var(node->var_decl.name, node->var_decl.init ? eval_expr(node->var_decl.init) : 0);
             break;
-        }
+
+        case AST_ASSIGN:
+            set_var(node->assign.name, eval_expr(node->assign.expr));
+            break;
 
         case AST_RETURN:
-            *ret_val = eval_expr(node->return_stmt.expr, env);
-            *returned = 1;
+            g_return_value = node->return_stmt.expr ? eval_expr(node->return_stmt.expr) : 0;
+            g_has_returned = 1;
             break;
 
-        case AST_IF: {
-            int cond = eval_expr(node->if_stmt.condition, env);
-            if (cond) {
-                eval_stmt(node->if_stmt.then_branch, env, returned, ret_val);
+        case AST_IF:
+            if (eval_expr(node->if_stmt.condition)) {
+                eval_stmt(node->if_stmt.then_branch);
             } else if (node->if_stmt.else_branch) {
-                eval_stmt(node->if_stmt.else_branch, env, returned, ret_val);
+                eval_stmt(node->if_stmt.else_branch);
             }
             break;
-        }
 
         case AST_WHILE:
-            while (eval_expr(node->while_stmt.condition, env) && !(*returned)) {
-                eval_stmt(node->while_stmt.body, env, returned, ret_val);
+            while (eval_expr(node->while_stmt.condition) && !g_has_returned) {
+                eval_stmt(node->while_stmt.body);
             }
-            break;
-
-        case AST_BLOCK:
-            for (int i = 0; i < node->block.stmt_count && !(*returned); i++) {
-                eval_stmt(node->block.stmts[i], env, returned, ret_val);
-            }
-            break;
-
-        case AST_FUNC_CALL:
-            eval_expr(node, env);
             break;
 
         default:
+            // Standalone expression statement (e.g. printf(...);)
+            eval_expr(node);
             break;
     }
-    return 0;
 }
 
-int eval_program(ASTNode *program) {
-    g_program = program;
-    return call_func("main", NULL, 0);
+int eval_program(const ASTNode *program) {
+    if (!program) return -1;
+
+    g_program_ast = program;
+    g_call_stack = NULL;
+    g_has_returned = 0;
+    g_return_value = 0;
+
+    const ASTNode *main_fn = find_function("main");
+    if (!main_fn) return -1;
+
+    push_frame();
+    for (int i = 0; i < main_fn->function.body_count && !g_has_returned; i++) {
+        eval_stmt(main_fn->function.body[i]);
+    }
+    int final_result = g_return_value;
+    pop_frame();
+
+    return final_result;
 }

@@ -69,7 +69,10 @@ class MainActivity : ComponentActivity() {
                         "ARCH" -> {
                             ArchitectureHomeScreen(
                                 modifier = Modifier.padding(innerPadding),
-                                onLaunchIDE = { selectedTab = "EDITOR" },
+                                onLaunchIDE = {
+                                    activeMode = "RUN"
+                                    selectedTab = "EDITOR"
+                                },
                                 onQuickRun = {
                                     activeMode = "RUN"
                                     selectedTab = "EDITOR"
@@ -593,19 +596,38 @@ fun CompilerStudioScreen(
     onRun: (String) -> String,
     onDisassemble: (String) -> String
 ) {
-    val presets = listOf(
-        CodePreset("Fibonacci", "int fib(int n) {\n    if (n <= 1) return n;\n    return fib(n - 1) + fib(n - 2);\n}\n\nint main() {\n    return fib(7);\n}"),
-        CodePreset("Loop Accumulator", "int main() {\n    int sum = 0;\n    int i = 1;\n    while (i <= 10) {\n        sum = sum + i;\n        i = i + 1;\n    }\n    return sum;\n}"),
-        CodePreset("Branch Logic", "int compare(int a, int b) {\n    if (a > b) return 1;\n    else return 0;\n}\n\nint main() {\n    return compare(42, 10);\n}")
-    )
+    val presets = remember {
+        listOf(
+            CodePreset(
+                "Hello World",
+                "#include <stdio.h>\n\nint main() {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}"
+            ),
+            CodePreset(
+                "Math Lib",
+                "#include <stdio.h>\n#include <math.h>\n\nint main() {\n    int val = 49;\n    int r = sqrt(val);\n    printf(\"sqrt(%d) = %d\\n\", val, r);\n    return r;\n}"
+            ),
+            CodePreset(
+                "Fibonacci",
+                "int fib(int n) {\n    if (n <= 1) return n;\n    return fib(n - 1) + fib(n - 2);\n}\n\nint main() {\n    return fib(7);\n}"
+            ),
+            CodePreset(
+                "Loop Accumulator",
+                "int main() {\n    int sum = 0;\n    int i = 1;\n    while (i <= 10) {\n        sum = sum + i;\n        i = i + 1;\n    }\n    return sum;\n}"
+            )
+        )
+    }
 
     var sourceCode by remember { mutableStateOf(presets[0].code) }
     var outputText by remember { mutableStateOf("") }
     var isAsmMode by remember { mutableStateOf(initialMode == "ASM") }
 
-    LaunchedEffect(Unit) {
-        if (isAsmMode) outputText = onDisassemble(sourceCode)
-        else outputText = "Program returned: " + onRun(sourceCode)
+    fun execute(asm: Boolean, src: String) {
+        isAsmMode = asm
+        outputText = if (asm) onDisassemble(src) else onRun(src)
+    }
+
+    LaunchedEffect(initialMode) {
+        execute(initialMode == "ASM", sourceCode)
     }
 
     Column(
@@ -623,8 +645,7 @@ fun CompilerStudioScreen(
                     selected = sourceCode == preset.code,
                     onClick = {
                         sourceCode = preset.code
-                        if (isAsmMode) outputText = onDisassemble(preset.code)
-                        else outputText = "Program returned: " + onRun(preset.code)
+                        execute(isAsmMode, preset.code)
                     },
                     label = { Text(preset.label, fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
                     colors = FilterChipDefaults.filterChipColors(
@@ -692,10 +713,7 @@ fun CompilerStudioScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Button(
-                onClick = {
-                    isAsmMode = false
-                    outputText = "Program returned: " + onRun(sourceCode)
-                },
+                onClick = { execute(false, sourceCode) },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -707,10 +725,7 @@ fun CompilerStudioScreen(
             }
 
             Button(
-                onClick = {
-                    isAsmMode = true
-                    outputText = onDisassemble(sourceCode)
-                },
+                onClick = { execute(true, sourceCode) },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(

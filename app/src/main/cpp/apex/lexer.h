@@ -1,41 +1,42 @@
-#ifndef LEXER_H
-#define LEXER_H
+#ifndef APEXC_LEXER_H
+#define APEXC_LEXER_H
 
 #include <stddef.h>
 
 typedef enum {
-    TOKEN_EOF = 0,
-    TOKEN_INT_LIT,     // Integer literal e.g. 10
-    TOKEN_IDENT,       // Identifier e.g. main
-    TOKEN_KW_INT,      // "int"
-    TOKEN_KW_RETURN,   // "return"
-    TOKEN_KW_IF,       // "if"
-    TOKEN_KW_ELSE,     // "else"
-    TOKEN_KW_WHILE,    // "while"
-    TOKEN_PLUS,        // '+'
-    TOKEN_MINUS,       // '-'
-    TOKEN_STAR,        // '*'
-    TOKEN_SLASH,       // '/'
-    TOKEN_ASSIGN,      // '='
-    TOKEN_EQ,          // "=="
-    TOKEN_NE,          // "!="
-    TOKEN_LT,          // "<"
-    TOKEN_LE,          // "<="
-    TOKEN_GT,          // ">"
-    TOKEN_GE,          // ">="
-    TOKEN_COMMA,       // ','
-    TOKEN_LPAREN,      // '('
-    TOKEN_RPAREN,      // ')'
-    TOKEN_LBRACE,      // '{'
-    TOKEN_RBRACE,      // '}'
-    TOKEN_SEMI,        // ';'
-    TOKEN_ERROR        // Lexing error
+    TOKEN_EOF,
+    TOKEN_INT_LIT,
+    TOKEN_STR_LIT,      // String literal: "..."
+    TOKEN_IDENT,
+    TOKEN_KW_INT,
+    TOKEN_KW_RETURN,
+    TOKEN_KW_IF,
+    TOKEN_KW_ELSE,
+    TOKEN_KW_WHILE,
+    TOKEN_PLUS,         // +
+    TOKEN_MINUS,        // -
+    TOKEN_STAR,         // *
+    TOKEN_SLASH,        // /
+    TOKEN_ASSIGN,       // =
+    TOKEN_EQ,           // ==
+    TOKEN_NE,           // !=
+    TOKEN_LT,           // <
+    TOKEN_LE,           // <=
+    TOKEN_GT,           // >
+    TOKEN_GE,           // >=
+    TOKEN_COMMA,        // ,
+    TOKEN_LPAREN,       // (
+    TOKEN_RPAREN,       // )
+    TOKEN_LBRACE,       // {
+    TOKEN_RBRACE,       // }
+    TOKEN_SEMI,         // ;
+    TOKEN_ERROR
 } TokenType;
 
 typedef struct {
     TokenType type;
     int int_value;
-    char *text;
+    char *text;         // Identifier name, raw symbol, or decoded string literal
     int line;
     int col;
 } Token;
@@ -54,4 +55,4 @@ Token lexer_peek_token(Lexer *l);
 void token_free(Token *t);
 const char *token_type_to_string(TokenType type);
 
-#endif // LEXER_H
+#endif // APEXC_LEXER_H

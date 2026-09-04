@@ -5,6 +5,8 @@ add_library(
         apexc
         SHARED
         native-lib.c
+        apex/apexc_api.c
+        apex/builtins.c
         apex/eval.c
         apex/lexer.c
         apex/parser.c

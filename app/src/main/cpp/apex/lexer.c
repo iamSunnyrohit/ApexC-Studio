@@ -31,20 +31,31 @@ static char advance_char(Lexer *l) {
     return c;
 }
 
-static void skip_whitespace_and_comments(Lexer *l) {
+static void skip_whitespace_comments_and_preprocessor(Lexer *l) {
     while (l->pos < l->len) {
         char c = peek_char(l);
+
+        // 1. Skip standard whitespace
         if (isspace((unsigned char)c)) {
             advance_char(l);
-        } else if (c == '/' && l->pos + 1 < l->len && l->src[l->pos + 1] == '/') {
-            // Line comment
+        }
+            // 2. Skip preprocessor lines (#include, #define)
+        else if (c == '#') {
+            advance_char(l);
+            while (l->pos < l->len && peek_char(l) != '\n') {
+                advance_char(l);
+            }
+        }
+            // 3. Skip line comments (// ...)
+        else if (c == '/' && l->pos + 1 < l->len && l->src[l->pos + 1] == '/') {
             advance_char(l);
             advance_char(l);
             while (l->pos < l->len && peek_char(l) != '\n') {
                 advance_char(l);
             }
-        } else if (c == '/' && l->pos + 1 < l->len && l->src[l->pos + 1] == '*') {
-            // Block comment
+        }
+            // 4. Skip block comments (/* ... */)
+        else if (c == '/' && l->pos + 1 < l->len && l->src[l->pos + 1] == '*') {
             advance_char(l);
             advance_char(l);
             while (l->pos < l->len) {
@@ -62,7 +73,7 @@ static void skip_whitespace_and_comments(Lexer *l) {
 }
 
 Token lexer_next_token(Lexer *l) {
-    skip_whitespace_and_comments(l);
+    skip_whitespace_comments_and_preprocessor(l);
 
     Token tok;
     tok.type = TOKEN_EOF;
@@ -78,6 +89,45 @@ Token lexer_next_token(Lexer *l) {
     }
 
     char c = peek_char(l);
+
+    // String literals ("...")
+    if (c == '"') {
+        advance_char(l); // consume opening quote
+        size_t cap = 64;
+        size_t size = 0;
+        char *buffer = malloc(cap);
+
+        while (l->pos < l->len && peek_char(l) != '"') {
+            char ch = advance_char(l);
+            // Handle escape sequences
+            if (ch == '\\' && l->pos < l->len) {
+                char esc = advance_char(l);
+                switch (esc) {
+                    case 'n':  ch = '\n'; break;
+                    case 't':  ch = '\t'; break;
+                    case 'r':  ch = '\r'; break;
+                    case '\\': ch = '\\'; break;
+                    case '"':  ch = '"';  break;
+                    case '0':  ch = '\0'; break;
+                    default:   ch = esc;  break;
+                }
+            }
+            if (size + 2 >= cap) {
+                cap *= 2;
+                buffer = realloc(buffer, cap);
+            }
+            buffer[size++] = ch;
+        }
+
+        if (peek_char(l) == '"') {
+            advance_char(l); // consume closing quote
+        }
+
+        buffer[size] = '\0';
+        tok.type = TOKEN_STR_LIT;
+        tok.text = buffer;
+        return tok;
+    }
 
     // Number literal
     if (isdigit((unsigned char)c)) {
@@ -123,7 +173,7 @@ Token lexer_next_token(Lexer *l) {
         return tok;
     }
 
-    // Two-character and single-character operators & punctuators
+    // Two-character and single-character comparison operators
     if (c == '=') {
         advance_char(l);
         if (peek_char(l) == '=') {
@@ -176,7 +226,7 @@ Token lexer_next_token(Lexer *l) {
         return tok;
     }
 
-    // Single character operators & punctuators
+    // Single-character operators & punctuators
     advance_char(l);
     tok.text = malloc(2);
     tok.text[0] = c;
@@ -203,8 +253,7 @@ Token lexer_next_token(Lexer *l) {
 
 Token lexer_peek_token(Lexer *l) {
     Lexer saved = *l;
-    Token t = lexer_next_token(&saved);
-    return t;
+    return lexer_next_token(&saved);
 }
 
 void token_free(Token *t) {
@@ -218,6 +267,7 @@ const char *token_type_to_string(TokenType type) {
     switch (type) {
         case TOKEN_EOF: return "EOF";
         case TOKEN_INT_LIT: return "INT_LIT";
+        case TOKEN_STR_LIT: return "STR_LIT";
         case TOKEN_IDENT: return "IDENT";
         case TOKEN_KW_INT: return "int";
         case TOKEN_KW_RETURN: return "return";

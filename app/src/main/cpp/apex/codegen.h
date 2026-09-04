@@ -1,9 +1,9 @@
-#ifndef CODEGEN_H
-#define CODEGEN_H
+#ifndef APEXC_CODEGEN_H
+#define APEXC_CODEGEN_H
 
-#include <stdio.h>
 #include "parser.h"
+#include <stdio.h>
 
-void codegen_generate(ASTNode *program, FILE *out);
+void codegen_generate(const ASTNode *program, FILE *out);
 
-#endif // CODEGEN_H
+#endif // APEXC_CODEGEN_H
