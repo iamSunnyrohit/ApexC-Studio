@@ -1,7 +1,7 @@
 
 <div align="center">
 
-<img src="./" alt="ApexC Studio Logo" width="128" style="border-radius: 24px;" />
+<img src="./logo.png" alt="ApexC Studio Logo" width="128" style="border-radius: 24px;" />
 
 # ApexC Studio
 
